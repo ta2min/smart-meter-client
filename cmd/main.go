@@ -321,18 +321,26 @@ func (bp BP35A1) GetMeasuredInstantaneous() (int, error) {
 	}
 
 	r := string(erxudp)
-	hexPower := r[len(r)-8:]
-	e, _ := strconv.ParseInt(hexPower, 16, 64)
-	bp.debugPrint(fmt.Sprintf("瞬間電力計測値: %d", e))
-	return int(e), nil
+	mi, err := bp.parseMeasuredInstantaneous(r[len(r)-8:])
+	if err != nil {
+		return 0, ErrParse
+	}
+	bp.debugPrint(fmt.Sprintf("瞬間電力計測値: %d", mi))
+	return mi, nil
+}
+
+func (bp BP35A1) parseMeasuredInstantaneous(hex string) (int, error) {
+	mi, err := strconv.ParseInt(hex, 16, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(mi), nil
 }
 
 func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
 	UnitFrame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xE1\x00")
 	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(UnitFrame))), UnitFrame...)
 	bp.Write(command)
-
-	var unit float64
 
 	line, err := bp.ReadLine()
 	if err != nil {
@@ -381,8 +389,23 @@ func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
 	if EPC != "E1" {
 		return 0, ErrParse
 	}
+
 	r := string(erxudp)
-	u, _ := strconv.ParseInt(r[len(r)-2:], 16, 64)
+	unit, err := bp.parseCumulativeElectricEnergyUnit(r[len(r)-2:])
+	if err != nil {
+		return 0, err
+	}
+
+	bp.debugPrint(fmt.Sprintf("積算電力量単位: %fkWh", unit))
+	return unit, nil
+}
+
+func (bp BP35A1) parseCumulativeElectricEnergyUnit(data string) (float64, error) {
+	u, err := strconv.ParseInt(data, 16, 64)
+	if err != nil {
+		return 0, err
+	}
+	var unit float64
 	switch u {
 	case 0:
 		unit = 1
@@ -404,9 +427,8 @@ func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
 		unit = 10000
 	default:
 		bp.debugPrint("inccorect number: ", u)
-		return 0, nil
+		return 0, ErrParse
 	}
-	bp.debugPrint(fmt.Sprintf("積算電力量単位: %fkWh", unit))
 	return unit, nil
 }
 
@@ -419,7 +441,6 @@ func (bp BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *
 	if err != nil {
 		return 0, nil, err
 	}
-	// エコーバック
 	bp.debugPrint(string(line))
 
 	event21, err := bp.ReadLine()
@@ -464,31 +485,41 @@ func (bp BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *
 	}
 
 	r := string(erxudp)
-	v := r[len(r)-22:]
-	tmp := v[:4]
-	yy, _ := strconv.ParseInt(tmp, 16, 64)
-	tmp = v[4 : 4+2]
-	mm, _ := strconv.ParseInt(tmp, 16, 64)
-	tmp = v[6 : 6+2]
-	dd, _ := strconv.ParseInt(tmp, 16, 64)
-
-	tmp = v[8 : 8+2]
-	hh, _ := strconv.ParseInt(tmp, 16, 64)
-	tmp = v[10 : 10+2]
-	m, _ := strconv.ParseInt(tmp, 16, 64)
-	tmp = v[12 : 12+2]
-	ss, _ := strconv.ParseInt(tmp, 16, 64)
-	bp.debugPrint(fmt.Sprintf("%04d/%02d/%02d %02d:%02d:%02d", yy, mm, dd, hh, m, ss))
-	bp.debugPrint(fmt.Sprintf("%d/%d/%d %d:%d:%d", yy, mm, dd, hh, m, ss))
-	time, err := time.Parse("20060102150405", fmt.Sprintf("%04d%02d%02d%02d%02d%02d", yy, mm, dd, hh, m, ss))
+	cee, time, err := bp.parseRegularTimeNormalDirectionCumulativeElectricEnergy(r[len(r)-22:])
 	if err != nil {
 		return 0, nil, err
 	}
-	bp.debugPrint("定時: ", time)
 
-	tmp = v[14:]
-	cumulativeElectricEnergy, _ := strconv.ParseInt(tmp, 16, 64)
-	bp.debugPrint("積算電力量: ", cumulativeElectricEnergy)
+	bp.debugPrint("定時: ", time)
+	bp.debugPrint("積算電力量: ", cee)
+
+	return int(cee), time, nil
+}
+
+func (bp BP35A1) parseRegularTimeNormalDirectionCumulativeElectricEnergy(data string) (int, *time.Time, error) {
+	tmp := data[:4]
+	yy, _ := strconv.ParseInt(tmp, 16, 64)
+	tmp = data[4 : 4+2]
+	MM, _ := strconv.ParseInt(tmp, 16, 64)
+	tmp = data[6 : 6+2]
+	dd, _ := strconv.ParseInt(tmp, 16, 64)
+
+	tmp = data[8 : 8+2]
+	hh, _ := strconv.ParseInt(tmp, 16, 64)
+	tmp = data[10 : 10+2]
+	mm, _ := strconv.ParseInt(tmp, 16, 64)
+	tmp = data[12 : 12+2]
+	ss, _ := strconv.ParseInt(tmp, 16, 64)
+	time, err := time.Parse("20060102150405", fmt.Sprintf("%04d%02d%02d%02d%02d%02d", yy, MM, dd, hh, mm, ss))
+	if err != nil {
+		return 0, nil, err
+	}
+
+	tmp = data[14:]
+	cumulativeElectricEnergy, err := strconv.ParseInt(tmp, 16, 64)
+	if err != nil {
+		return 0, nil, ErrParse
+	}
 
 	return int(cumulativeElectricEnergy), &time, nil
 }
