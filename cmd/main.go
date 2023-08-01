@@ -316,7 +316,7 @@ func (bp BP35A1) GetMeasuredInstantaneous() (int, error) {
 	EPC := res[24 : 24+2]
 	bp.debugPrint("seoj: ", seoj, "ESV: ", ESV, "EPC: ", EPC)
 
-	if seoj != "028801" && ESV != "72" && EPC != "E7" {
+	if seoj != "028801" || ESV != "72" || EPC != "E7" {
 		return 0, ErrParse
 	}
 
@@ -382,11 +382,7 @@ func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
 	EPC := res[24 : 24+2]
 	bp.debugPrint("seoj: ", seoj, "ESV: ", ESV, "EPC: ", EPC)
 
-	if seoj != "028801" && ESV != "72" && EPC != "E7" {
-		return 0, ErrParse
-	}
-
-	if EPC != "E1" {
+	if seoj != "028801" || ESV != "72" || EPC != "E1" {
 		return 0, ErrParse
 	}
 
@@ -476,11 +472,7 @@ func (bp BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *
 	EPC := res[24 : 24+2]
 	bp.debugPrint("seoj: ", seoj, "ESV: ", ESV, "EPC: ", EPC)
 
-	if seoj != "028801" && ESV != "72" && EPC != "E7" {
-		return 0, nil, ErrParse
-	}
-
-	if EPC != "EA" {
+	if seoj != "028801" || ESV != "72" || EPC != "EA" {
 		return 0, nil, ErrParse
 	}
 
