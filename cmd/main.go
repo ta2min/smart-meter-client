@@ -516,6 +516,72 @@ func (bp BP35A1) parseRegularTimeNormalDirectionCumulativeElectricEnergy(data st
 	return int(cumulativeElectricEnergy), &time, nil
 }
 
+func (bp BP35A1) GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *time.Time, float64, error) {
+	cumulativeElectricEnergyAndUnitFrame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x02\xE1\x00\xEA\x00")
+	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(cumulativeElectricEnergyAndUnitFrame))), cumulativeElectricEnergyAndUnitFrame...)
+	bp.Write(command)
+
+	line, err := bp.ReadLine()
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint(string(line))
+
+	event21, err := bp.ReadLine()
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint(string(event21))
+	if string(event21) == "EVENT 21" {
+		return 0, nil, 0, ErrUnexpectedString
+	}
+
+	ok, err := bp.ReadLine()
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint(string(ok))
+
+	erxudp, err := bp.ReadLine()
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint(string(erxudp))
+
+	if !strings.HasPrefix(string(erxudp), "ERXUDP") {
+		return 0, nil, 0, ErrUnexpectedString
+	}
+
+	cols := strings.Split(strings.TrimSpace(string(erxudp)), " ")
+	bp.debugPrint("cols: ", cols)
+	res := cols[8]
+	seoj := res[8 : 8+6]
+	ESV := res[20 : 20+2]
+	EPC1 := res[24 : 24+2]
+	EPC2 := res[30 : 30+2]
+	bp.debugPrint("seoj: ", seoj, "ESV: ", ESV, "EPC1: ", EPC1, "EPC2: ", EPC2)
+
+	if seoj != "028801" || ESV != "72" || EPC1 != "E1" || EPC2 != "EA" {
+		return 0, nil, 0, ErrParse
+	}
+
+	unit, err := bp.parseCumulativeElectricEnergyUnit(res[28 : 28+2])
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint("unit: ", unit)
+	bp.debugPrint("res: ", res[34:34+22])
+
+	cee, time, err := bp.parseRegularTimeNormalDirectionCumulativeElectricEnergy(res[34 : 34+22])
+	if err != nil {
+		return 0, nil, 0, err
+	}
+	bp.debugPrint("定時: ", time)
+	bp.debugPrint("積算電力量: ", cee)
+
+	return cee, time, unit, nil
+}
+
 func NewBP35A1(portName string, baudRate int, RBID string, RBPW string, debugMode bool) (*BP35A1, error) {
 	port, err := serial.Open(portName, &serial.Mode{
 		BaudRate: baudRate,
@@ -612,41 +678,15 @@ func main() {
 	count := 0
 	BP35A1.SetReadTimeout(10 * time.Second)
 	for {
-		v, err := BP35A1.GetMeasuredInstantaneous()
+		cee, t, unit, err := BP35A1.GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy()
 		if err != nil {
-			if errors.Is(err, ErrReadTimeout) {
-				fmt.Println("read timeout. next loop")
-				continue
-			}
 			fmt.Println(err)
-			return
 		}
-		fmt.Printf("瞬時電力量: %d W\n", v)
-
-		unit, err := BP35A1.GetCumulativeElectricEnergyUnit()
-		if err != nil {
-			if errors.Is(err, ErrReadTimeout) {
-				fmt.Println("read timeout. next loop")
-				continue
-			}
-			fmt.Println(err)
-			return
-		}
-
-		v, t, err := BP35A1.GetRegularTimeNormalDirectionCumulativeElectricEnergy()
-		if err != nil {
-			if errors.Is(err, ErrReadTimeout) {
-				fmt.Println("read timeout. next loop")
-				continue
-			}
-			fmt.Println(err)
-			return
-		}
-		fmt.Println("計測時間: ", t)
-		fmt.Printf("積算電力量: %3f\n", float64(v)*unit)
-
 		count++
-		fmt.Println(time.Now(), count)
-		time.Sleep(10 * time.Second)
+
+		fmt.Println(time.Now(), count, cee)
+		fmt.Println("計測時間: ", t)
+		fmt.Println("積算電力量: ", float64(cee)*float64(unit), "kwh")
+		time.Sleep(30 * time.Second)
 	}
 }
