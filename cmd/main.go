@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -41,15 +42,16 @@ type BP35A1 struct {
 	RouteB_ID   string
 	RouteB_PW   string
 	IPv6Addr    string
+	used        sync.Mutex
 }
 
-func (bp BP35A1) debugPrint(a ...any) {
+func (bp *BP35A1) debugPrint(a ...any) {
 	if bp.Debug {
 		fmt.Fprintln(bp.DebugWriter, a...)
 	}
 }
 
-func (bp BP35A1) ReadLine() ([]byte, error) {
+func (bp *BP35A1) ReadLine() ([]byte, error) {
 	var data []byte
 	buf := make([]byte, 1)
 
@@ -75,7 +77,7 @@ func (bp BP35A1) ReadLine() ([]byte, error) {
 	return data[:len(data)-2], nil
 }
 
-func (bp BP35A1) FetchVersion() (string, error) {
+func (bp *BP35A1) FetchVersion() (string, error) {
 	bp.Write([]byte("SKVER\r\n"))
 
 	echoBack, err := bp.ReadLine()
@@ -99,7 +101,7 @@ func (bp BP35A1) FetchVersion() (string, error) {
 	return string(version), nil
 }
 
-func (bp BP35A1) RouteBLogin() error {
+func (bp *BP35A1) RouteBLogin() error {
 	bp.Write([]byte(fmt.Sprintf("SKSETRBID %s \r\n", bp.RouteB_ID)))
 
 	echoBack, err := bp.ReadLine()
@@ -175,7 +177,7 @@ func (bp *BP35A1) SetNetWrokInfo() error {
 	}
 }
 
-func (bp BP35A1) RegistChannel() error {
+func (bp *BP35A1) RegistChannel() error {
 	bp.Write([]byte(fmt.Sprintf("SKSREG S2 %s\r\n", bp.NetWrokInfo.Channel)))
 
 	echoBack, err := bp.ReadLine()
@@ -193,7 +195,7 @@ func (bp BP35A1) RegistChannel() error {
 	return nil
 }
 
-func (bp BP35A1) RegistPanID() error {
+func (bp *BP35A1) RegistPanID() error {
 	bp.Write([]byte(fmt.Sprintf("SKSREG S3 %s\r\n", bp.NetWrokInfo.PanID)))
 
 	echoBack, err := bp.ReadLine()
@@ -231,7 +233,7 @@ func (bp *BP35A1) SetIPv6Addr() error {
 	return nil
 }
 
-func (bp BP35A1) ConBRoute() error {
+func (bp *BP35A1) ConBRoute() error {
 	bp.Write([]byte(fmt.Sprintf("SKJOIN %s\r\n", bp.IPv6Addr)))
 
 	echoBack, err := bp.ReadLine()
@@ -270,7 +272,10 @@ func (bp BP35A1) ConBRoute() error {
 	return nil
 }
 
-func (bp BP35A1) GetMeasuredInstantaneous() (int, error) {
+func (bp *BP35A1) GetMeasuredInstantaneous() (int, error) {
+	bp.used.Lock()
+	defer bp.used.Unlock()
+
 	echonetLiteFame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xE7\x00")
 	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(echonetLiteFame))), echonetLiteFame...)
 	bp.debugPrint(hex.EncodeToString(command))
@@ -329,7 +334,7 @@ func (bp BP35A1) GetMeasuredInstantaneous() (int, error) {
 	return mi, nil
 }
 
-func (bp BP35A1) parseMeasuredInstantaneous(hex string) (int, error) {
+func (bp *BP35A1) parseMeasuredInstantaneous(hex string) (int, error) {
 	mi, err := strconv.ParseInt(hex, 16, 64)
 	if err != nil {
 		return 0, err
@@ -337,7 +342,10 @@ func (bp BP35A1) parseMeasuredInstantaneous(hex string) (int, error) {
 	return int(mi), nil
 }
 
-func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
+func (bp *BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
+	bp.used.Lock()
+	defer bp.used.Unlock()
+
 	UnitFrame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xE1\x00")
 	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(UnitFrame))), UnitFrame...)
 	bp.Write(command)
@@ -396,7 +404,7 @@ func (bp BP35A1) GetCumulativeElectricEnergyUnit() (float64, error) {
 	return unit, nil
 }
 
-func (bp BP35A1) parseCumulativeElectricEnergyUnit(data string) (float64, error) {
+func (bp *BP35A1) parseCumulativeElectricEnergyUnit(data string) (float64, error) {
 	u, err := strconv.ParseInt(data, 16, 64)
 	if err != nil {
 		return 0, err
@@ -428,7 +436,10 @@ func (bp BP35A1) parseCumulativeElectricEnergyUnit(data string) (float64, error)
 	return unit, nil
 }
 
-func (bp BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *time.Time, error) {
+func (bp *BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *time.Time, error) {
+	bp.used.Lock()
+	defer bp.used.Unlock()
+
 	cumulativeElectricEnergyFrame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01\xEA\x00")
 	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(cumulativeElectricEnergyFrame))), cumulativeElectricEnergyFrame...)
 	bp.Write(command)
@@ -488,7 +499,7 @@ func (bp BP35A1) GetRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *
 	return int(cee), time, nil
 }
 
-func (bp BP35A1) parseRegularTimeNormalDirectionCumulativeElectricEnergy(data string) (int, *time.Time, error) {
+func (bp *BP35A1) parseRegularTimeNormalDirectionCumulativeElectricEnergy(data string) (int, *time.Time, error) {
 	tmp := data[:4]
 	yy, _ := strconv.ParseInt(tmp, 16, 64)
 	tmp = data[4 : 4+2]
@@ -516,7 +527,10 @@ func (bp BP35A1) parseRegularTimeNormalDirectionCumulativeElectricEnergy(data st
 	return int(cumulativeElectricEnergy), &time, nil
 }
 
-func (bp BP35A1) GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *time.Time, float64, error) {
+func (bp *BP35A1) GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy() (int, *time.Time, float64, error) {
+	bp.used.Lock()
+	defer bp.used.Unlock()
+
 	cumulativeElectricEnergyAndUnitFrame := []byte("\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x02\xE1\x00\xEA\x00")
 	command := append([]byte(fmt.Sprintf("SKSENDTO 1 %s 0E1A 1 %04X ", bp.IPv6Addr, len(cumulativeElectricEnergyAndUnitFrame))), cumulativeElectricEnergyAndUnitFrame...)
 	bp.Write(command)
@@ -636,12 +650,6 @@ func main() {
 	BP35A1.ResetOutputBuffer()
 	BP35A1.ResetInputBuffer()
 
-	version, err := BP35A1.FetchVersion()
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println("version: ", version)
-
 	err = BP35A1.RouteBLogin()
 	if err != nil {
 		fmt.Println(err)
@@ -675,18 +683,33 @@ func main() {
 	}
 	fmt.Println("successful connection to B route")
 
-	count := 0
 	BP35A1.SetReadTimeout(10 * time.Second)
-	for {
-		cee, t, unit, err := BP35A1.GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy()
-		if err != nil {
-			fmt.Println(err)
-		}
-		count++
 
-		fmt.Println(time.Now(), count, cee)
-		fmt.Println("計測時間: ", t)
-		fmt.Println("積算電力量: ", float64(cee)*float64(unit), "kwh")
-		time.Sleep(30 * time.Second)
+	measuredInstantaneousTicker := time.NewTicker(1 * time.Second)
+	EnergyTicker := time.NewTicker(10 * time.Second)
+
+	for {
+		select {
+		case <-measuredInstantaneousTicker.C:
+			go func() {
+				measuredInstantaneous, err := BP35A1.GetMeasuredInstantaneous()
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				fmt.Println("瞬間電力量", measuredInstantaneous, "w")
+
+			}()
+		case <-EnergyTicker.C:
+			go func() {
+				cee, t, unit, err := BP35A1.GetUnitAndRegularTimeNormalDirectionCumulativeElectricEnergy()
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+				fmt.Println("計測時間: ", t)
+				fmt.Println("積算電力量: ", float64(cee)*float64(unit), "kwh")
+			}()
+		}
 	}
 }
